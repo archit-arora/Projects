@@ -1,0 +1,88 @@
+# ----------------------------------------
+# LAGRANGIAN RELAXATION FOR
+# THE CFL PROBLEM
+# ----------------------------------------
+
+printf "\nLP RELAXATION\n\n";
+
+model Knapsackrelax.mod;
+data Project.dat;
+
+option omit_zero_rows 1;
+option display_eps .000001;
+option solution_round 8;
+
+option solver cplexamp;
+option solver_msg 0;
+
+option relax_integrality 1;
+objective TotalCost;
+
+solve;
+
+param LB; 
+param UB;
+let LB := TotalCost.val;
+let UB := 900000;
+
+option relax_integrality 0;
+
+problem LowerBound: FacilityOpen, FracDemand, SupplyifFacilityOpen, ServiceLevelSatisfiedConstraint, capacityconstraint, Lagrangian;
+problem UpperBound: FracDemand, DemandConstraint, SupplyifFacilityOpen, ServiceLevelSatisfiedConstraint, capacityconstraint, TotalCost;
+
+let {c in 1..C,p in 1..P} u[c,p] := 0;
+
+param slack {1..C,1..P};
+param scale  default 2;
+param norm;
+param step;
+
+param same  default 0;
+param same_limit := 3;
+
+param iter_limit := 50;
+param LBlog {0..iter_limit};  let LBlog[0] := LB;
+param UBlog {0..iter_limit};  let UBlog[0] := UB;
+param scalelog {1..iter_limit};
+param steplog {1..iter_limit};
+
+for {k in 1..iter_limit} { printf "\nITERATION %d\n\n", k;
+   solve LowerBound;
+
+   let {c in 1..C, p in 1..P} slack[c,p] := (sum{f in 1..F} FracDemand[f,c,p] - 1);
+
+   if Lagrangian > LB + 0.000001 then {
+      let LB := 1.08*Lagrangian;
+      let same := 0; }
+   else let same := same + 1;
+
+   if same = same_limit then {
+      let scale := scale / 2;
+      let same := 0;
+      };
+
+   let norm := sum {c in 1..C, p in 1..P} slack[c,p]^2;
+   let step := scale * (UB - Lagrangian) / norm;
+
+   let {c in 1..C,p in 1..P} u[c,p] := u[c,p] less step * slack[c,p];
+
+   if sum {i in 1..F} FacilityOpen[i] 
+         >= sum {j in 1..F} 1 - 1e-8 then { 
+      solve UpperBound;
+      let UB := min (UB, TotalCost);
+      }
+
+   let LBlog[k] := LB;
+   let UBlog[k] := UB;
+   let scalelog[k] := scale;
+   let steplog[k] := step;
+   
+   }
+
+printf "\n\n";
+display u;
+display LBlog, UBlog, scalelog, steplog;
+display 1.085*Lagrangian;
+
+
+

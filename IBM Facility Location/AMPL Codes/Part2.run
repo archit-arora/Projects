@@ -1,0 +1,88 @@
+
+# ----------------------------------------
+# LAGRANGIAN RELAXATION FOR
+# THE LOCATION-TRANSPORTATION PROBLEM
+# ----------------------------------------
+
+printf "\nLP RELAXATION\n\n";
+
+model Part2.mod;
+data Part2_a.dat;
+
+option omit_zero_rows 1;
+option display_eps .000001;
+option solution_round 8;
+
+option solver cplexamp;
+option solver_msg 0;
+
+option relax_integrality 1;
+objective TotalCost;
+
+solve;
+
+param LB; 
+param UB;
+let LB := TotalCost.val;
+let UB := sum {h in 0..H} max {wh in 0..WH} cost_HtoWH[h,wh] + sum{wh in 0..WH} max {c in 0..C} cost_WHtoC[wh,c];
+
+option relax_integrality 0;
+
+problem LowerBound: HubOpen, WarehouseOpen, HubDemand, WHFracDemand, DemandConstraint, SupplyifHubOpen, SupplyifWHOpen, ServiceLevelConstraint, Lagrangian;
+problem UpperBound: Cust_DemandSatisfied, HubDemand, WHFracDemand, DemandConstraint, SupplyifHubOpen, TotalCost;
+
+let {c in 0..C, p in 0..P} u[c,p] := 0;
+
+param slack {0..C, 0..P};
+param scale  default 2;
+param norm;
+param step;
+
+param same  default 0;
+param same_limit := 3;
+
+param iter_limit := 30;
+param LBlog {1..iter_limit};  let LBlog[0] := LB;
+param UBlog {1..iter_limit};  let UBlog[0] := UB;
+param scalelog {1..iter_limit};
+param steplog {1..iter_limit};
+
+for {k in 1..iter_limit} { printf "\nITERATION %d\n\n", k;
+   solve LowerBound;
+
+   let {c in 0..C, p in 0..P} slack[c,p] := sum {wh in 0..WH, p in 0..P} WHFracDemand[wh,c,p] - 1;
+
+   if Lagrangian > LB + 0.000001 then {
+      let LB := Lagrangian;
+      let same := 0; }
+   else let same := same + 1;
+
+   if same = same_limit then {
+      let scale := scale / 2;
+      let same := 0;
+      };
+
+   let norm := sum {c in 0..C, p in 0..P} slack[c,p]^2;
+   let step := scale * (UB - Lagrangian) / norm;
+
+   let {c in 0..C, p in 0..P} u[c,p] := u[c,p] less step * slack[c,p];
+
+   if sum {i in 0..C} Open[i] 
+         >= sum {j in 0..C} 1 - 1e-8 then { 
+      solve UpperBound;
+      let UB := min (UB, TotalCost);
+      }
+
+   let LBlog[k] := LB;
+   let UBlog[k] := UB;
+   let scalelog[k] := scale;
+   let steplog[k] := step;
+   }
+
+printf "\n\n";
+display LBlog, UBlog, scalelog, steplog;
+display Lagrangian;
+#display Open;
+#display FracMet;
+
+
